@@ -79,9 +79,9 @@ struct render_load_info
 
 	render_load_info(const uint32_t* point_list, const float2* points_xy, const float4* rgb_depth, const float4* conic_opacity)
 	{
-		for (int lane = 0; lane < 32; lane++)//分配每个线程任务
+		for (int lane = 0; lane < 32; lane++)//分配每个线程任务（cpu端）
 		{
-			switch (lane)
+			switch (lane)//这些 `case` 都是在给 `data[lane]` 保存相应数组的首地址
 			{
 			case 0:
 				data[lane] = point_list;
@@ -180,7 +180,7 @@ struct render_load_info
 __forceinline__ __device__ void get_gaussian_features(float2& xy, float3& rgb, float4& con_o, float buf, int offset)
 {
 	xy = {
-		__shfl_sync(~0, buf, 8 + offset),
+		__shfl_sync(~0, buf, 8 + offset),//让每个调用这个指令的线程，从 Lane 8 的 buf 中读取数据，不需要把数据放在共享内存
 		__shfl_sync(~0, buf, 9 + offset)
 	};
 	rgb = {
@@ -198,8 +198,8 @@ __forceinline__ __device__ void get_gaussian_features(float2& xy, float3& rgb, f
 
 template<int BLOCK_X, int BLOCK_Y, int THREAD_X, int THREAD_Y>
 __global__ void renderCUDA(
-	const int2* __restrict__ ranges,
-	const uint32_t* __restrict__ point_list,
+	const int2* __restrict__ ranges,//二维结构体，每个 Tile 在排序列表中的起止范围，x起始，y结尾
+	const uint32_t* __restrict__ point_list,//按 Tile 和深度组织的高斯 ID 列表
 	int width, int height, int x_blocks,
 	const float2* __restrict__ points_xy,
 	const float4* __restrict__ rgb_depth,
@@ -208,13 +208,13 @@ __global__ void renderCUDA(
 	float3 bg_color,
 	uchar3* __restrict__ out_color)
 {
-	int2 range = ranges[blockIdx.y * x_blocks + blockIdx.x];
+	int2 range = ranges[blockIdx.y * x_blocks + blockIdx.x];//通过 blockIdx 找到对应的 Tile，再取出这个 Tile 的 range
 	int lane = threadIdx.y * blockDim.x + threadIdx.x;
 	const void* data = info.data[lane];
 	int lg2_scale = info.lg2_scale[lane];
 
-	// uint2 pix = { blockIdx.x * BLOCK_X + threadIdx.x, blockIdx.y * BLOCK_Y + threadIdx.y };
-	int2 pix[THREAD_Y][THREAD_X];
+	// uint2 pix = { blockIdx.x * BLOCK_X + threadIdx.x, blockIdx.y * BLOCK_Y + threadIdx.y };二维向量，相当于结构体
+	int2 pix[THREAD_Y][THREAD_X];//二维数组，一个线程负责的像素坐标集合
 #pragma unroll
 	for (int i = 0; i < THREAD_Y; i++)
 	{
@@ -262,8 +262,8 @@ __global__ void renderCUDA(
 		}
 	}
 
-	int point_id = range.x;
-	if (point_id < range.y)
+	int point_id = range.x;//此tile第一个高斯位置
+	if (point_id < range.y)//至少有一个高斯
 	{
 		int offset;
 		float2 xy;
@@ -285,7 +285,7 @@ __global__ void renderCUDA(
 		{
 			offset = point_list[point_id + 1];
 		}
-		const float* ptr = reinterpret_cast<const float*>(reinterpret_cast<const char*>(data) + ((int64_t)offset << lg2_scale));
+		const float* ptr = reinterpret_cast<const float*>(reinterpret_cast<const char*>(data) + ((int64_t)offset << lg2_scale));//此元素具体地址
 		float buf;
 		bool load_enable = data != nullptr;
 		if (lane == 0)
@@ -312,9 +312,9 @@ __global__ void renderCUDA(
 		load_enable = data != nullptr;
 
 		bool done = false;
-		while (__any_sync(~0, point_id + 5 < range.y && !done))
+		while (__any_sync(~0, point_id + 5 < range.y && !done))//只要 Warp 中至少一个线程满足条件，就让整个 Warp 进入循环
 		{
-			offset = __shfl_sync(~0, __float_as_uint(buf), lane & 4);
+			offset = __shfl_sync(~0, __float_as_uint(buf), lane & 4);//按相应的分组从thread0/1读值
 			if (lane == 0)
 			{
 				offset = point_id + 4;
