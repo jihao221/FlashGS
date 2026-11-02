@@ -221,7 +221,7 @@ __global__ void renderCUDA(
 #pragma unroll
 		for (int j = 0; j < THREAD_X; j++)
 		{
-			pix[i][j] = {
+			pix[i][j] = {//像素全局位置
 				(int)blockIdx.x * BLOCK_X + (int)threadIdx.x * THREAD_X + j,
 				(int)blockIdx.y * BLOCK_Y + (int)threadIdx.y * THREAD_Y + i
 			};
@@ -236,13 +236,13 @@ __global__ void renderCUDA(
 #pragma unroll
 		for (int j = 0; j < THREAD_X; j++)
 		{
-			pixf[i][j] = { (float)pix[i][j].x, (float)pix[i][j].y };
+			pixf[i][j] = { (float)pix[i][j].x, (float)pix[i][j].y };//换成float
 		}
 	}
 
 	float T[THREAD_Y][THREAD_X];
 #pragma unroll
-	for (int i = 0; i < THREAD_Y; i++)
+	for (int i = 0; i < THREAD_Y; i++)//初始化一个thread负责的像素的T
 	{
 #pragma unroll
 		for (int j = 0; j < THREAD_X; j++)
@@ -279,7 +279,7 @@ __global__ void renderCUDA(
 		}
 		else if ((lane & 4) == 0 && point_id + 1 < range.y)
 		{
-			offset = point_list[point_id + 0];
+			offset = point_list[point_id + 0];//data[lane] = &points_xy->x;，所以offset为高斯编号
 		}
 		else if (point_id + 2 < range.y)
 		{
@@ -312,7 +312,7 @@ __global__ void renderCUDA(
 		load_enable = data != nullptr;
 
 		bool done = false;
-		while (__any_sync(~0, point_id + 5 < range.y && !done))//只要 Warp 中至少一个线程满足条件，就让整个 Warp 进入循环
+		while (__any_sync(~0, point_id + 5 < range.y && !done))//只要 Warp 中至少一个线程满足条件，就让整个 Warp 进入循环。至少剩六个高斯
 		{
 			offset = __shfl_sync(~0, __float_as_uint(buf), lane & 4);//按相应的分组从thread0/1读值
 			if (lane == 0)
@@ -355,7 +355,7 @@ __global__ void renderCUDA(
 #endif
 			}
 
-			get_gaussian_features(xy, rgb, con_o, buf, 0);
+			get_gaussian_features(xy, rgb, con_o, buf, 0);//广播thread0，每个线程得到xy=二维中心    rgb = 颜色    con_o = 形状与不透明度
 #ifdef _DEBUG
 			if (lane == 3 && xy.x != points_xy[point_list[point_id + 0]].x)
 			{
@@ -369,11 +369,11 @@ __global__ void renderCUDA(
 	#pragma unroll
 				for (int j = 0; j < THREAD_X; j++)
 				{
-					pixel_shader(C[i][j], T[i][j], pixf[i][j], xy, con_o, rgb);
+					pixel_shader(C[i][j], T[i][j], pixf[i][j], xy, con_o, rgb);//每个像素颜色累积
 				}
 			}
 
-			get_gaussian_features(xy, rgb, con_o, buf, 4);
+			get_gaussian_features(xy, rgb, con_o, buf, 4);//广播thread4
 #ifdef _DEBUG
 			if (lane == 3 && xy.x != points_xy[point_list[point_id + 1]].x)
 			{
@@ -405,7 +405,7 @@ __global__ void renderCUDA(
 			point_id += 2;
 			buf = ldg_buf;
 		}
-		while (__any_sync(~0, point_id < range.y && !done))
+		while (__any_sync(~0, point_id < range.y && !done))//只有1-5个高斯时
 		{
 			offset = __shfl_sync(~0, __float_as_uint(buf), lane & 4);
 			if (lane == 0)
@@ -483,7 +483,7 @@ __global__ void renderCUDA(
 				}
 			}
 
-			if (point_id + 1 >= range.y)
+			if (point_id + 1 >= range.y)//检查第二个高斯是否存在
 				break;
 
 			get_gaussian_features(xy, rgb, con_o, buf, 4);
