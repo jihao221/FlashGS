@@ -74,12 +74,12 @@ __forceinline__ __device__ uint8_t write_color(uchar3* __restrict__ out_color,
 
 struct render_load_info
 {
-	const void* data[FLASHGS_WARP_SIZE] = { nullptr };
-	int lg2_scale[FLASHGS_WARP_SIZE] = { 0 };
+	const void* data[FLASHGS_WARP_SIZE] = { nullptr };//32 个指针，每个位置对应 Warp 中一个 lane
+	int lg2_scale[FLASHGS_WARP_SIZE] = { 0 };//：记录每个数组元素所占字节数的以 2 为底的对数。
 
 	render_load_info(const uint32_t* point_list, const float2* points_xy, const float4* rgb_depth, const float4* conic_opacity)
 	{
-		for (int lane = 0; lane < 32; lane++)
+		for (int lane = 0; lane < 32; lane++)//分配每个线程任务
 		{
 			switch (lane)
 			{
